@@ -40,6 +40,15 @@ model Organization {
   integrations Integration[]
   alerts      Alert[]
 
+  // MODULE 1: Creative Studio
+  creatives   Creative[]
+  brandAssets BrandAsset[]
+  promptTemplates AIPromptTemplate[]
+
+  // MODULE 2: Campaign Engine
+  briefTemplates BriefTemplate[]
+  events      Event[]
+
   settings    Json?         // Custom settings
 
   createdAt   DateTime      @default(now())
@@ -86,6 +95,13 @@ model Campaign {
   trackingLinks   TrackingLink[]
   qrCodes         QRCode[]
   events          TrackingEvent[]
+
+  // MODULE 1: Creative Studio
+  creatives       Creative[]
+
+  // MODULE 2: Campaign Engine
+  tasks           CampaignTask[]
+  briefs          Brief[]
 
   // Metadata
   metadata        Json?           // Custom fields
@@ -396,4 +412,479 @@ enum AlertStatus {
   SENT
   FAILED
   THROTTLED
+}
+
+// ============================================
+// MODULE 1: CREATIVE STUDIO
+// ============================================
+
+model Creative {
+  id              String          @id @default(cuid())
+
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  campaignId      String?
+  campaign        Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  name            String
+  type            CreativeType
+  format          CreativeFormat
+
+  // Content
+  content         String?         @db.Text // Text content for posts/emails
+  htmlContent     String?         @db.Text // HTML for emails
+  imageUrl        String?         // Main image URL
+  videoUrl        String?         // Video URL
+
+  // AI Generated metadata
+  generatedBy     String?         // "ai" or "manual"
+  promptUsed      String?         @db.Text
+
+  // Dimensions (for images)
+  width           Int?
+  height          Int?
+
+  // Performance tracking
+  impressions     Int             @default(0)
+  clicks          Int             @default(0)
+  conversions     Int             @default(0)
+  revenue         Float           @default(0)
+
+  // A/B Testing
+  variants        CreativeVariant[]
+  isControlGroup  Boolean         @default(false)
+
+  // Status
+  status          CreativeStatus  @default(DRAFT)
+
+  // Metadata
+  tags            String[]
+  metadata        Json?
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([organizationId])
+  @@index([campaignId])
+  @@index([type])
+  @@index([status])
+  @@map("creatives")
+}
+
+enum CreativeType {
+  SOCIAL_POST      // Facebook, Instagram, TikTok post
+  EMAIL            // Email marketing
+  BANNER           // Display ads
+  VIDEO            // Video content
+  LANDING_PAGE     // Landing page copy
+  SEO_CONTENT      // Blog/SEO content
+}
+
+enum CreativeFormat {
+  IMAGE
+  VIDEO
+  TEXT
+  HTML
+  CAROUSEL
+}
+
+enum CreativeStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+model CreativeVariant {
+  id          String      @id @default(cuid())
+
+  creativeId  String
+  creative    Creative    @relation(fields: [creativeId], references: [id], onDelete: Cascade)
+
+  name        String      // E.g., "Variant A", "Red CTA Button"
+  description String?
+
+  // Content differences
+  content     String?     @db.Text
+  imageUrl    String?
+
+  // Performance
+  impressions Int         @default(0)
+  clicks      Int         @default(0)
+  conversions Int         @default(0)
+  revenue     Float       @default(0)
+
+  // Traffic allocation
+  trafficPercent Int      @default(50) // Percentage of traffic
+
+  isWinner    Boolean     @default(false)
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([creativeId])
+  @@map("creative_variants")
+}
+
+model AIPromptTemplate {
+  id              String    @id @default(cuid())
+
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String
+  description     String?
+  category        PromptCategory
+
+  // Prompt
+  promptTemplate  String    @db.Text
+  systemPrompt    String?   @db.Text
+
+  // Variables in template (e.g., {{product_name}}, {{tone}})
+  variables       String[]
+
+  // Example outputs
+  examples        Json?
+
+  // Usage stats
+  usageCount      Int       @default(0)
+  avgRating       Float?
+
+  isPublic        Boolean   @default(false)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([organizationId])
+  @@index([category])
+  @@map("ai_prompt_templates")
+}
+
+enum PromptCategory {
+  FACEBOOK_POST
+  TIKTOK_CAPTION
+  EMAIL_SUBJECT
+  EMAIL_BODY
+  SEO_BLOG
+  PRODUCT_DESCRIPTION
+  AD_COPY
+  CUSTOM
+}
+
+model BrandAsset {
+  id              String          @id @default(cuid())
+
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String
+  type            BrandAssetType
+  category        String?         // E.g., "Logo", "Font", "Color Palette"
+
+  // Asset data
+  fileUrl         String?         // For logo, images
+  value           String?         // For colors (#FF0000), font names
+  fontFamily      String?         // For fonts
+  hexColor        String?         // For colors
+
+  // File metadata
+  fileSize        Int?            // In bytes
+  mimeType        String?
+
+  // Version control
+  version         Int             @default(1)
+  previousVersionId String?
+  previousVersion   BrandAsset?   @relation("AssetVersions", fields: [previousVersionId], references: [id], onDelete: SetNull)
+  versions          BrandAsset[]  @relation("AssetVersions")
+
+  // Usage tracking
+  usageCount      Int             @default(0)
+  lastUsedAt      DateTime?
+
+  // Access control
+  isPublic        Boolean         @default(true)
+
+  // Metadata
+  description     String?
+  tags            String[]
+  metadata        Json?
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([organizationId])
+  @@index([type])
+  @@map("brand_assets")
+}
+
+enum BrandAssetType {
+  LOGO
+  COLOR
+  FONT
+  IMAGE
+  ICON
+  TEMPLATE
+}
+
+// ============================================
+// MODULE 2: CAMPAIGN ENGINE
+// ============================================
+
+model CampaignTask {
+  id              String        @id @default(cuid())
+
+  campaignId      String
+  campaign        Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  title           String
+  description     String?       @db.Text
+
+  type            TaskType
+  status          TaskStatus    @default(TODO)
+
+  // Scheduling
+  startDate       DateTime?
+  endDate         DateTime?
+  dueDate         DateTime?
+
+  // Assignment
+  assignedToEmail String?
+
+  // Dependencies
+  dependsOn       String[]      // Array of task IDs
+
+  // Event details (if type = EVENT)
+  eventId         String?       @unique
+  event           Event?        @relation(fields: [eventId], references: [id])
+
+  // Metadata
+  priority        Priority      @default(MEDIUM)
+  tags            String[]
+  metadata        Json?
+
+  completedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([campaignId])
+  @@index([status])
+  @@index([startDate])
+  @@map("campaign_tasks")
+}
+
+enum TaskType {
+  FACEBOOK_ADS
+  GOOGLE_ADS
+  TIKTOK_ADS
+  KOL_POST
+  EMAIL_BLAST
+  EVENT
+  CONTENT_CREATION
+  REVIEW_APPROVAL
+  OTHER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model BriefTemplate {
+  id              String    @id @default(cuid())
+
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String
+  description     String?
+  type            BriefType
+
+  // Template structure
+  sections        Json      // Array of sections with fields
+
+  // E.g., { "sections": [
+  //   { "title": "Campaign Goals", "fields": [
+  //     { "label": "Objective", "type": "text", "required": true },
+  //     { "label": "Target Audience", "type": "textarea" }
+  //   ]}
+  // ]}
+
+  // Usage
+  usageCount      Int       @default(0)
+  isDefault       Boolean   @default(false)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Instances
+  briefs          Brief[]
+
+  @@index([organizationId])
+  @@index([type])
+  @@map("brief_templates")
+}
+
+enum BriefType {
+  KOL_BRIEF
+  CREATIVE_BRIEF
+  EVENT_BRIEF
+  CAMPAIGN_BRIEF
+  CUSTOM
+}
+
+model Brief {
+  id              String          @id @default(cuid())
+
+  campaignId      String
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  templateId      String?
+  template        BriefTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  title           String
+  type            BriefType
+
+  // Content (JSON structure based on template)
+  content         Json
+
+  // Status
+  status          BriefStatus     @default(DRAFT)
+
+  // Approval workflow
+  approvedBy      String?
+  approvedAt      DateTime?
+
+  // Attachments
+  attachments     String[]        // URLs to files
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([campaignId])
+  @@index([status])
+  @@map("briefs")
+}
+
+enum BriefStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+model Event {
+  id              String        @id @default(cuid())
+
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String
+  description     String?       @db.Text
+  type            EventType
+
+  // Location
+  location        String?
+  address         String?
+  latitude        Float?
+  longitude       Float?
+
+  // Virtual event
+  isVirtual       Boolean       @default(false)
+  virtualUrl      String?
+
+  // Timing
+  startDate       DateTime
+  endDate         DateTime
+
+  // Budget & ROI
+  budget          Float?
+  spent           Float         @default(0)
+  revenue         Float         @default(0)
+
+  // Capacity
+  maxGuests       Int?
+  registeredCount Int           @default(0)
+  checkedInCount  Int           @default(0)
+
+  // QR Code for check-in
+  qrCode          String?       @unique
+
+  // Guests
+  guests          EventGuest[]
+
+  // Task relation
+  task            CampaignTask?
+
+  // Metadata
+  tags            String[]
+  metadata        Json?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([startDate])
+  @@index([type])
+  @@map("events")
+}
+
+enum EventType {
+  WORKSHOP
+  SEMINAR
+  PRODUCT_LAUNCH
+  NETWORKING
+  CONFERENCE
+  WEBINAR
+  TRADE_SHOW
+  POPUP_STORE
+  OTHER
+}
+
+model EventGuest {
+  id          String      @id @default(cuid())
+
+  eventId     String
+  event       Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  // Guest info
+  email       String
+  name        String?
+  phone       String?
+  company     String?
+  jobTitle    String?
+
+  // Registration
+  registeredAt DateTime   @default(now())
+  source       String?    // How they registered
+
+  // Check-in
+  checkedIn    Boolean    @default(false)
+  checkedInAt  DateTime?
+  qrCode       String?    @unique // Personal QR for check-in
+
+  // Attendance tracking
+  sessionHash  String?    // For attribution
+
+  // Post-event
+  revenue      Float?     // Purchase attributed to this guest
+
+  // Metadata
+  metadata     Json?
+
+  @@unique([eventId, email])
+  @@index([eventId])
+  @@index([checkedIn])
+  @@map("event_guests")
 }
