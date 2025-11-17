@@ -1,0 +1,399 @@
+// MinSuite Marketing Platform - Database Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & ORGANIZATION
+// ============================================
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String?
+  password      String
+  role          UserRole       @default(USER)
+  organizationId String?
+  organization  Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  campaigns     Campaign[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Organization {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  domain      String?
+
+  users       User[]
+  campaigns   Campaign[]
+  integrations Integration[]
+  alerts      Alert[]
+
+  settings    Json?         // Custom settings
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("organizations")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+  VIEWER
+}
+
+// ============================================
+// CAMPAIGN MANAGEMENT
+// ============================================
+
+model Campaign {
+  id              String          @id @default(cuid())
+  name            String
+  slug            String
+  description     String?
+
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  createdById     String
+  createdBy       User            @relation(fields: [createdById], references: [id])
+
+  status          CampaignStatus  @default(DRAFT)
+  type            CampaignType    @default(ONLINE)
+
+  // Budget & ROI
+  budget          Float?          // VND
+  spent           Float           @default(0)
+  revenue         Float           @default(0)
+
+  // Dates
+  startDate       DateTime?
+  endDate         DateTime?
+
+  // Tracking
+  trackingLinks   TrackingLink[]
+  qrCodes         QRCode[]
+  events          TrackingEvent[]
+
+  // Metadata
+  metadata        Json?           // Custom fields
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdById])
+  @@map("campaigns")
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum CampaignType {
+  ONLINE
+  OFFLINE
+  HYBRID
+}
+
+// ============================================
+// TRACKING LINKS (Universal Tracking)
+// ============================================
+
+model TrackingLink {
+  id          String        @id @default(cuid())
+  shortCode   String        @unique   // e.g., "abc123"
+
+  campaignId  String
+  campaign    Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  // Original URL
+  targetUrl   String        // Destination URL
+
+  // UTM Parameters
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+
+  // Analytics
+  clicks      Int           @default(0)
+  conversions Int           @default(0)
+
+  // Tracking events
+  events      TrackingEvent[]
+
+  // Metadata
+  metadata    Json?
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([campaignId])
+  @@index([shortCode])
+  @@map("tracking_links")
+}
+
+// ============================================
+// QR CODES (Offline Attribution)
+// ============================================
+
+model QRCode {
+  id          String        @id @default(cuid())
+  code        String        @unique   // Unique identifier
+
+  campaignId  String
+  campaign    Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  // QR Details
+  name        String        // e.g., "Poster Landmark 81"
+  type        QRCodeType    @default(DISCOUNT)
+
+  // Discount info (if applicable)
+  discountCode String?
+  discountValue Float?      // Percentage or fixed amount
+  discountType DiscountType?
+
+  // Location info
+  location    String?       // e.g., "Landmark 81, HCMC"
+  latitude    Float?
+  longitude   Float?
+
+  // Target
+  targetUrl   String?       // Where QR redirects to
+
+  // Analytics
+  scans       Int           @default(0)
+  conversions Int           @default(0)
+  revenue     Float         @default(0)
+
+  // Tracking events
+  events      TrackingEvent[]
+
+  // QR Image URL
+  imageUrl    String?
+
+  // Metadata
+  metadata    Json?
+
+  isActive    Boolean       @default(true)
+  expiresAt   DateTime?
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([campaignId])
+  @@index([code])
+  @@map("qr_codes")
+}
+
+enum QRCodeType {
+  DISCOUNT
+  CHECKIN
+  SURVEY
+  REDIRECT
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+// ============================================
+// TRACKING EVENTS (Raw Data)
+// ============================================
+
+model TrackingEvent {
+  id              String        @id @default(cuid())
+
+  // Event Type
+  type            EventType
+
+  // Relations
+  campaignId      String?
+  campaign        Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  trackingLinkId  String?
+  trackingLink    TrackingLink? @relation(fields: [trackingLinkId], references: [id], onDelete: SetNull)
+
+  qrCodeId        String?
+  qrCode          QRCode?       @relation(fields: [qrCodeId], references: [id], onDelete: SetNull)
+
+  // Session tracking (hashed for privacy)
+  sessionHash     String?       // Hash of IP + User Agent
+  fingerprintHash String?       // Browser fingerprint hash
+
+  // Device & Location (anonymized)
+  deviceType      String?       // mobile, desktop, tablet
+  browser         String?
+  os              String?
+  city            String?       // City level only
+  country         String        @default("VN")
+
+  // Event data
+  referrer        String?
+  landingPage     String?
+
+  // Conversion data
+  revenue         Float?        // If this is a purchase event
+  conversionValue Float?        // General conversion value
+
+  // Metadata
+  metadata        Json?         // Additional event data
+
+  // Timestamps
+  timestamp       DateTime      @default(now())
+
+  @@index([campaignId, timestamp])
+  @@index([type, timestamp])
+  @@index([sessionHash])
+  @@map("tracking_events")
+}
+
+enum EventType {
+  CLICK           // Link click
+  SCAN            // QR scan
+  PAGE_VIEW       // Page view
+  CONVERSION      // General conversion
+  PURCHASE        // Purchase (with revenue)
+  LEAD            // Lead generation
+  SIGNUP          // User signup
+}
+
+// ============================================
+// INTEGRATIONS (Haravan, Sapo, KiotViet)
+// ============================================
+
+model Integration {
+  id              String           @id @default(cuid())
+
+  organizationId  String
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  type            IntegrationType
+  name            String
+
+  // Credentials (encrypted)
+  apiKey          String?
+  apiSecret       String?
+  accessToken     String?
+  refreshToken    String?
+  webhookUrl      String?
+
+  // Config
+  config          Json?
+
+  isActive        Boolean          @default(true)
+  lastSyncAt      DateTime?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([organizationId])
+  @@map("integrations")
+}
+
+enum IntegrationType {
+  HARAVAN
+  SAPO
+  KIOTVIET
+  ZALO_OA
+  FACEBOOK_ADS
+  GOOGLE_ADS
+  TIKTOK_ADS
+  WIFI_PROVIDER
+  CUSTOM
+}
+
+// ============================================
+// ALERTS & NOTIFICATIONS
+// ============================================
+
+model Alert {
+  id              String        @id @default(cuid())
+
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String
+  type            AlertType
+
+  // Conditions
+  condition       Json          // E.g., { "roi": { "lt": 0 } }
+
+  // Actions
+  channels        AlertChannel[]  // Zalo, Email, SMS
+  recipients      String[]      // Phone numbers, emails, Zalo IDs
+
+  // Throttling
+  throttleMinutes Int           @default(60) // Don't send more than once per hour
+  lastTriggeredAt DateTime?
+
+  isActive        Boolean       @default(true)
+
+  // Logs
+  logs            AlertLog[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@map("alerts")
+}
+
+enum AlertType {
+  ROI_NEGATIVE
+  BUDGET_THRESHOLD
+  REVENUE_DROP
+  CAMPAIGN_COMPLETED
+  CUSTOM
+}
+
+enum AlertChannel {
+  ZALO
+  EMAIL
+  SMS
+  WEBHOOK
+}
+
+model AlertLog {
+  id          String      @id @default(cuid())
+
+  alertId     String
+  alert       Alert       @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  status      AlertStatus
+  message     String
+  error       String?
+
+  triggeredAt DateTime    @default(now())
+
+  @@index([alertId])
+  @@index([triggeredAt])
+  @@map("alert_logs")
+}
+
+enum AlertStatus {
+  SENT
+  FAILED
+  THROTTLED
+}
