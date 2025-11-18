@@ -302,6 +302,12 @@ model Campaign {
   status          CampaignStatus  @default(DRAFT)
   type            CampaignType    @default(ONLINE)
 
+  // Universal Tracking Link fields
+  source          String?         // Traffic source: FACEBOOK, TIKTOK, GOOGLE, KOL, EVENT, etc.
+  platform        String?         // Platform: FACEBOOK, INSTAGRAM, TIKTOK, GOOGLE_ADS, etc.
+  kolsName        String?         // KOL name (if type = KOL)
+  branch          String?         // Branch/location (if applicable)
+
   // Budget & ROI
   budget          Float?          // VND
   spent           Float           @default(0)
@@ -342,6 +348,8 @@ model Campaign {
   @@index([organizationId])
   @@index([status])
   @@index([createdById])
+  @@index([source])
+  @@index([platform])
   @@map("campaigns")
 }
 
@@ -373,7 +381,13 @@ model TrackingLink {
   // Original URL
   targetUrl   String        // Destination URL
 
-  // UTM Parameters
+  // Source-based tracking (new approach)
+  source      String?       // FACEBOOK, TIKTOK, GOOGLE, KOL, EVENT
+  platform    String?       // FACEBOOK, INSTAGRAM, TIKTOK, GOOGLE_ADS
+  kolsName    String?       // KOL name if source = KOL
+  branch      String?       // Branch/location
+
+  // UTM Parameters (legacy support)
   utmSource   String?
   utmMedium   String?
   utmCampaign String?
@@ -383,6 +397,7 @@ model TrackingLink {
   // Analytics
   clicks      Int           @default(0)
   conversions Int           @default(0)
+  revenue     Float         @default(0)
 
   // Tracking events
   events      TrackingEvent[]
@@ -395,6 +410,8 @@ model TrackingLink {
 
   @@index([campaignId])
   @@index([shortCode])
+  @@index([source])
+  @@index([platform])
   @@map("tracking_links")
 }
 
