@@ -16,19 +16,82 @@ model User {
   id            String         @id @default(cuid())
   email         String         @unique
   name          String?
-  password      String
+  password      String?        // Nullable for OAuth-only users
+  image         String?        // Profile picture from OAuth
   role          UserRole       @default(USER)
   organizationId String?
   organization  Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  // Email verification
+  emailVerified      DateTime?
+  verificationToken  String?   @unique
+  verificationExpires DateTime?
+
+  // Password reset
+  resetToken        String?   @unique
+  resetTokenExpires DateTime?
+
+  // Relations
   campaigns     Campaign[]
   queryLogs     QueryLog[]
+  accounts      Account[]      // OAuth accounts
+  sessions      Session[]      // Active sessions
+  teamUsers     TeamUser[]     // Team memberships
+  auditLogs     AuditLog[]     // Audit trail
+  ownedTeams    Team[]         @relation("TeamOwner")
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
   @@index([organizationId])
+  @@index([email])
+  @@index([verificationToken])
+  @@index([resetToken])
   @@map("users")
+}
+
+// NextAuth Account model (for OAuth)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+// NextAuth Session model
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// NextAuth VerificationToken model
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
 }
 
 model Organization {
@@ -69,10 +132,155 @@ model Organization {
   @@map("organizations")
 }
 
+// ============================================
+// MULTI-TENANCY: TEAMS
+// ============================================
+
+model Team {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  description String?
+
+  // Owner
+  ownerId     String
+  owner       User       @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Members
+  members     TeamUser[]
+
+  // Subscription & billing
+  subscription Json?     // { "plan": "pro", "status": "active", "periodEnd": "..." }
+  stripeCustomerId String? @unique
+  stripeSubscriptionId String? @unique
+
+  // Settings
+  settings    Json?
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([ownerId])
+  @@index([slug])
+  @@map("teams")
+}
+
+model TeamUser {
+  id        String    @id @default(cuid())
+
+  teamId    String
+  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role      TeamRole  @default(MEMBER)
+
+  // Invitation details
+  invitedBy String?
+  invitedAt DateTime  @default(now())
+  joinedAt  DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@map("team_users")
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
 enum UserRole {
   ADMIN
   USER
   VIEWER
+}
+
+// ============================================
+// AUDIT LOG (Compliance & Security)
+// ============================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Action details
+  action    AuditAction
+  entity    String?  // e.g., "Campaign", "User", "Team"
+  entityId  String?  // ID of the affected entity
+
+  // Request metadata
+  ipAddress String?
+  userAgent String?  @db.Text
+
+  // Changes (before/after)
+  changes   Json?    // { "before": {...}, "after": {...} }
+
+  // Additional metadata
+  metadata  Json?
+
+  // Status
+  success   Boolean  @default(true)
+  errorMessage String? @db.Text
+
+  timestamp DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+  @@index([entityId])
+  @@map("audit_logs")
+}
+
+enum AuditAction {
+  // Auth actions
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  SIGNUP
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  EMAIL_VERIFIED
+
+  // User actions
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+
+  // Team actions
+  TEAM_CREATED
+  TEAM_UPDATED
+  TEAM_DELETED
+  TEAM_MEMBER_INVITED
+  TEAM_MEMBER_JOINED
+  TEAM_MEMBER_REMOVED
+  TEAM_ROLE_CHANGED
+
+  // Campaign actions
+  CAMPAIGN_CREATED
+  CAMPAIGN_UPDATED
+  CAMPAIGN_DELETED
+
+  // Data export (GDPR)
+  DATA_EXPORTED
+  DATA_DELETED
+
+  // Security
+  API_KEY_CREATED
+  API_KEY_REVOKED
+  PERMISSION_CHANGED
+
+  // Other
+  CUSTOM
 }
 
 // ============================================
